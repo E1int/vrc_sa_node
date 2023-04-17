@@ -28,11 +28,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .interact_text()?;
     let socket = UdpSocket::bind(host).unwrap();
 
-    // let heart_rate_address: String = Input::new()
-    //     .with_prompt("Heart rate OSC address")
-    //     .with_initial_text("/HeartRate".to_string())
-    //     .interact_text()?;
-
     let manager = Manager::new().await?;
     let adapters = manager.adapters().await?;
     let adpater_selection_items: Vec<_> = adapters
@@ -102,10 +97,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             data.uuid, data.value
         );
         let beats_per_minute: u8 = data.value[1];
-        // let message = OscPacket::Message(OscMessage {
-        //     addr: heart_rate_address.clone(),
-        //     args: vec![OscType::Int(beats_per_minute as i32)],
-        // });
         let content = format!("HR: {:?}", beats_per_minute);
         let message = OscPacket::Message(OscMessage {
             addr: chatbox_input_address.to_string(),
