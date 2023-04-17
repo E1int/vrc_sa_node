@@ -9,6 +9,7 @@ use std::error::Error;
 use std::net::{SocketAddrV4, UdpSocket};
 use std::time::{Duration, Instant};
 use tokio::time;
+use tracing::info;
 use uuid::{uuid, Uuid};
 
 const HEART_RATE_CHARACTERISTIC_UUID: Uuid = uuid!("00002a37-0000-1000-8000-00805f9b34fb");
@@ -27,6 +28,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_initial_text("127.0.0.1:9000".to_string())
         .interact_text()?;
     let socket = UdpSocket::bind(host).unwrap();
+    info!("Binded to address {}", host);
 
     let manager = Manager::new().await?;
     let adapters = manager.adapters().await?;
@@ -78,7 +80,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let peripheral = peripherals.get(peripheral_selection).unwrap();
 
     peripheral.connect().await?;
-    println!("Connected to {:?}", peripheral);
+    info!("Connected to {:?}", peripheral);
 
     peripheral.discover_services().await?;
     let characteristics = peripheral.characteristics();
@@ -93,8 +95,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut notification_stream = peripheral.notifications().await?;
     let mut last_message_instant = Instant::now();
     while let Some(data) = notification_stream.next().await {
-        println!(
-            "Received data from bluetooth peripheral [{:?}]: {:?}",
+        info!(
+            "Received data from peripheral [{:?}]: {:?}",
             data.uuid, data.value
         );
         if last_message_instant.elapsed().as_secs() > 2 {
