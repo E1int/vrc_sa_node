@@ -7,7 +7,7 @@ use futures::StreamExt;
 use rosc::{encoder, OscMessage, OscPacket, OscType};
 use std::error::Error;
 use std::net::{SocketAddrV4, UdpSocket};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::time;
 use uuid::{uuid, Uuid};
 
@@ -91,24 +91,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     peripheral.subscribe(heartrate_characteristic).await?;
     let mut notification_stream = peripheral.notifications().await?;
+    let mut last_message_instant = Instant::now();
     while let Some(data) = notification_stream.next().await {
         println!(
             "Received data from bluetooth peripheral [{:?}]: {:?}",
             data.uuid, data.value
         );
-        let beats_per_minute: u8 = data.value[1];
-        let content = format!("HR: {:?}", beats_per_minute);
-        let message = OscPacket::Message(OscMessage {
-            addr: chatbox_input_address.to_string(),
-            args: vec![
-                OscType::String(content),
-                OscType::Bool(true),
-                OscType::Bool(false),
-            ],
-        });
-        let buffer = encoder::encode(&message).unwrap();
-        socket.send_to(&buffer, client).unwrap();
-        println!("Sent data to client [{:?}]: {:?}", client, message);
+        if last_message_instant.elapsed().as_secs() > 2 {
+            let beats_per_minute: u8 = data.value[1];
+            let content = format!("HR: {:?}", beats_per_minute);
+            let message = OscPacket::Message(OscMessage {
+                addr: chatbox_input_address.to_string(),
+                args: vec![
+                    OscType::String(content),
+                    OscType::Bool(true),
+                    OscType::Bool(false),
+                ],
+            });
+            let buffer = encoder::encode(&message).unwrap();
+            socket.send_to(&buffer, client).unwrap();
+            println!("Sent data to client [{:?}]: {:?}", client, message);
+            last_message_instant = Instant::now()
+        }
     }
 
     Ok(())
