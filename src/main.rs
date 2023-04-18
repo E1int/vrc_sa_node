@@ -80,7 +80,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let peripheral = peripherals.get(peripheral_selection).unwrap();
 
     peripheral.connect().await?;
-    info!("Connected to {:?}", peripheral);
+    let peripheral_local_name = peripheral.properties().await?.unwrap().local_name.unwrap();
+    info!("Connected to {}", peripheral_local_name);
 
     peripheral.discover_services().await?;
     let characteristics = peripheral.characteristics();
@@ -96,8 +97,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut last_message_instant = Instant::now();
     while let Some(data) = notification_stream.next().await {
         info!(
-            "Received data from peripheral [{:?}]: {:?}",
-            data.uuid, data.value
+            "Received data from {} [{:?}]: {:?}",
+            peripheral_local_name, data.uuid, data.value
         );
         if last_message_instant.elapsed().as_secs() > 2 {
             let beats_per_minute: u8 = data.value[1];
