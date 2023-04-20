@@ -85,6 +85,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     peripheral.discover_services().await?;
     let characteristics = peripheral.characteristics();
+
+    let battery_level_characteristic = characteristics
+        .iter()
+        .find(|characteristic| characteristic.uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID)
+        .unwrap();
+    let battery_level = peripheral.read(battery_level_characteristic).await?[0];
+    info!(
+        "Battery level of {}: {}",
+        peripheral_local_name, battery_level
+    );
+
     let heart_rate_characteristic = characteristics
         .iter()
         .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
