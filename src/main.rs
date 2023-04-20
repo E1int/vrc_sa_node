@@ -85,14 +85,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     peripheral.discover_services().await?;
     let characteristics = peripheral.characteristics();
-    let heartrate_characteristic = characteristics
+    let heart_rate_characteristic = characteristics
         .iter()
         .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
         .unwrap();
 
     let chatbox_input_address = "/chatbox/input";
 
-    peripheral.subscribe(heartrate_characteristic).await?;
+    peripheral.subscribe(heart_rate_characteristic).await?;
     let mut notification_stream = peripheral.notifications().await?;
     let mut last_message_instant = Instant::now();
     while let Some(data) = notification_stream.next().await {
