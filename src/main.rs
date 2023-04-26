@@ -106,35 +106,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
         .unwrap();
 
-    let chatbox_input_address = "/chatbox/input";
-
     peripheral.subscribe(heart_rate_characteristic).await?;
     let mut notification_stream = peripheral.notifications().await?;
-    let mut last_message_instant = Instant::now();
     while let Some(data) = notification_stream.next().await {
         info!(
             "Received data from {} [{:?}]: {:?}",
             peripheral_local_name, data.uuid, data.value
         );
-        if last_message_instant.elapsed().as_secs() > 2 {
-            let beats_per_minute: u8 = data.value[1];
-            let content = format!("HR: {:?}", beats_per_minute);
-            let message = OscPacket::Message(OscMessage {
-                addr: chatbox_input_address.to_string(),
-                args: vec![
-                    OscType::String(content),
-                    OscType::Bool(true),
-                    OscType::Bool(false),
-                ],
-            });
-            let buffer = encoder::encode(&message).unwrap();
-            socket.send_to(&buffer, &arguments.client).unwrap();
-            info!(
-                "Sent data to client [{:?}]: {:?}",
-                arguments.client, message
-            );
-            last_message_instant = Instant::now()
-        }
+        let beats_per_minute: u8 = data.value[1];
+        let percent = beats_per_minute as f32 / u8::MAX as f32;
+        let message = OscPacket::Message(OscMessage {
+            addr: String::from("/avatar/parameters/HeartRate"),
+            args: vec![OscType::Float(percent)],
+        });
+        let buffer = encoder::encode(&message).unwrap();
+        socket.send_to(&buffer, &arguments.client).unwrap();
+        info!(
+            "Sent message to client [{:?}]: {:?}",
+            arguments.client, message
+        );
     }
 
     Ok(())
