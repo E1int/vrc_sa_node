@@ -37,52 +37,72 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let manager = Manager::new().await?;
     let adapters = manager.adapters().await?;
-    let adpater_selection_items: Vec<_> = adapters
-        .iter()
-        .map(|adapter| format!("{:?}", adapter))
-        .collect();
-    let adapter_selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Select bluetooth adapter")
-        .default(0)
-        .items(&adpater_selection_items)
-        .interact()
-        .unwrap();
-    let adapter = adapters.get(adapter_selection).unwrap();
+    let adapter = if adapters.len() == 1 {
+        adapters.first().unwrap()
+    } else {
+        let adpater_selection_items = join_all(
+            adapters
+                .iter()
+                .map(|adapter| async { format!("{:?}", adapter.adapter_info().await.unwrap()) })
+                .collect::<Vec<_>>(),
+        )
+        .await;
+        let adapter_selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Select bluetooth adapter")
+            .default(0)
+            .items(&adpater_selection_items)
+            .interact()
+            .unwrap();
+        adapters.get(adapter_selection).unwrap()
+    };
 
-    let scan_duration_input: u64 = Input::new()
-        .with_prompt("How many seconds do you want to scan for?")
-        .with_initial_text("5".to_string())
-        .interact_text()?;
-    adapter.start_scan(ScanFilter::default()).await?;
-    let scan_duration = Duration::from_secs(scan_duration_input);
-    time::sleep(scan_duration).await;
+    let peripheral = loop {
+        adapter.start_scan(ScanFilter::default()).await?;
+        let scan_duration = Duration::from_secs(1);
+        time::sleep(scan_duration).await;
+        adapter.stop_scan().await?;
 
-    let peripherals = adapter.peripherals().await?;
-    let peripheral_selection_items = join_all(
-        peripherals
-            .iter()
-            .map(|peripheral| async {
-                format!(
-                    "{:?}",
-                    peripheral
-                        .properties()
-                        .await
-                        .unwrap()
-                        .unwrap()
-                        .local_name
-                        .unwrap()
-                )
-            })
-            .collect::<Vec<_>>(),
-    )
-    .await;
-    let peripheral_selection = Select::with_theme(&ColorfulTheme::default())
-        .with_prompt("Select bluetooth peripheral")
-        .default(0)
-        .items(&peripheral_selection_items)
-        .interact()
-        .unwrap();
-    let peripheral = peripherals.get(peripheral_selection).unwrap();
+        let peripherals = adapter.peripherals().await?;
+        if peripherals.len() == 0 {
+            info!("No peripherals found, scanning again");
+            continue;
+        }
+
+        let mut peripheral_selection_items = vec![String::from("[Scan again]")];
+        peripheral_selection_items.append(
+            &mut join_all(
+                peripherals
+                    .iter()
+                    .map(|peripheral| async {
+                        format!(
+                            "{:?}",
+                            peripheral
+                                .properties()
+                                .await
+                                .unwrap()
+                                .unwrap()
+                                .local_name
+                                .unwrap()
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .await,
+        );
+
+        let peripheral_selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Select bluetooth peripheral")
+            .default(0)
+            .items(&peripheral_selection_items)
+            .interact()
+            .unwrap();
+        if peripheral_selection == 0 {
+            info!("User chose to scan again");
+            continue;
+        }
+
+        break peripherals.get(peripheral_selection).cloned().unwrap();
+    };
 
     peripheral.connect().await?;
     let peripheral_local_name = peripheral.properties().await?.unwrap().local_name.unwrap();
