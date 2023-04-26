@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 btleplug = "0.10"
+clap = { version = "4.2", features = ["derive"] }
 dialoguer = "0.10"
 futures = "0.3"
 rosc = "0.10"

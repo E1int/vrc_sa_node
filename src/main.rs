@@ -1,12 +1,12 @@
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::Manager;
-use dialoguer::Input;
+use btleplug::platform::{Manager, Peripheral};
+use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, Select};
 use futures::future::join_all;
 use futures::StreamExt;
 use rosc::{encoder, OscMessage, OscPacket, OscType};
 use std::error::Error;
-use std::net::{SocketAddrV4, UdpSocket};
+use std::net::UdpSocket;
 use std::time::{Duration, Instant};
 use tokio::time;
 use tracing::info;
@@ -15,20 +15,25 @@ use uuid::{uuid, Uuid};
 const HEART_RATE_CHARACTERISTIC_UUID: Uuid = uuid!("00002a37-0000-1000-8000-00805f9b34fb");
 const BATTERY_LEVEL_CHARACTERISTIC_UUID: Uuid = uuid!("00002a19-0000-1000-8000-00805f9b34fb");
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Arguments {
+    /// Host address
+    #[arg(long, default_value_t = String::from("127.0.0.1:9001"))]
+    host: String,
+
+    /// Client address
+    #[arg(long, default_value_t = String::from("127.0.0.1:9000"))]
+    client: String,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
 
-    let host: SocketAddrV4 = Input::new()
-        .with_prompt("Host address")
-        .with_initial_text("127.0.0.1:9001".to_string())
-        .interact_text()?;
-    let client: SocketAddrV4 = Input::new()
-        .with_prompt("Client address")
-        .with_initial_text("127.0.0.1:9000".to_string())
-        .interact_text()?;
-    let socket = UdpSocket::bind(host).unwrap();
-    info!("Binded to address {}", host);
+    let arguments = Arguments::parse();
+    let socket = UdpSocket::bind(&arguments.host).unwrap();
+    info!("Binded to address {}", arguments.host);
 
     let manager = Manager::new().await?;
     let adapters = manager.adapters().await?;
@@ -123,8 +128,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 ],
             });
             let buffer = encoder::encode(&message).unwrap();
-            socket.send_to(&buffer, client).unwrap();
-            println!("Sent data to client [{:?}]: {:?}", client, message);
+            socket.send_to(&buffer, &arguments.client).unwrap();
+            println!(
+                "Sent data to client [{:?}]: {:?}",
+                arguments.client, message
+            );
             last_message_instant = Instant::now()
         }
     }
