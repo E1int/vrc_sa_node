@@ -1,5 +1,5 @@
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::{Manager, Peripheral};
+use btleplug::platform::Manager;
 use clap::Parser;
 use dialoguer::{theme::ColorfulTheme, Select};
 use futures::future::join_all;
@@ -7,7 +7,7 @@ use futures::StreamExt;
 use rosc::{encoder, OscMessage, OscPacket, OscType};
 use std::error::Error;
 use std::net::UdpSocket;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::time;
 use tracing::info;
 use uuid::{uuid, Uuid};
