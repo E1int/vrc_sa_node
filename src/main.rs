@@ -1,6 +1,8 @@
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::Manager;
+use chrono::prelude::Local;
 use clap::Parser;
+use csv::Writer;
 use dialoguer::{theme::ColorfulTheme, Select};
 use futures::future::join_all;
 use futures::StreamExt;
@@ -126,6 +128,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
         .unwrap();
 
+    let log_name = format!("{}.csv", Local::now().timestamp());
+    let mut writer = Writer::from_path(log_name)?;
+
     peripheral.subscribe(heart_rate_characteristic).await?;
     let mut notification_stream = peripheral.notifications().await?;
     while let Some(data) = notification_stream.next().await {
@@ -145,6 +150,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "Sent message to client [{:?}]: {:?}",
             arguments.client, message
         );
+
+        let now = Local::now().to_rfc3339();
+        let heart_rate = beats_per_minute.to_string();
+        writer.write_record(&[&now, &heart_rate])?;
+        writer.flush()?;
     }
 
     Ok(())
