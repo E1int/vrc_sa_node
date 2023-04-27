@@ -101,7 +101,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             continue;
         }
 
-        break peripherals.get(peripheral_selection).cloned().unwrap();
+        break peripherals.get(peripheral_selection - 1).cloned().unwrap();
     };
 
     peripheral.connect().await?;
