@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+async-trait = "0.1"
 btleplug = "0.10"
 chrono = "0.4"
 clap = { version = "4.2", features = ["derive"] }

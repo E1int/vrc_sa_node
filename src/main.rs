@@ -1,5 +1,7 @@
+use anyhow::Result;
+use async_trait::async_trait;
 use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
-use btleplug::platform::Manager;
+use btleplug::platform::{Adapter, Manager, Peripheral};
 use chrono::prelude::Local;
 use clap::Parser;
 use csv::Writer;
@@ -16,6 +18,25 @@ use uuid::{uuid, Uuid};
 
 const HEART_RATE_CHARACTERISTIC_UUID: Uuid = uuid!("00002a37-0000-1000-8000-00805f9b34fb");
 const BATTERY_LEVEL_CHARACTERISTIC_UUID: Uuid = uuid!("00002a19-0000-1000-8000-00805f9b34fb");
+
+#[async_trait]
+trait AdapterExt {
+    async fn scan_for(&self, seconds: u64) -> Result<()>;
+}
+
+#[async_trait]
+impl AdapterExt for Adapter {
+    async fn scan_for(&self, seconds: u64) -> Result<()> {
+        let filter = ScanFilter::default();
+        let duration = Duration::from_secs(seconds);
+
+        self.start_scan(filter).await?;
+        time::sleep(duration).await;
+        self.stop_scan().await?;
+
+        Ok(())
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -59,10 +80,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let peripheral = loop {
-        adapter.start_scan(ScanFilter::default()).await?;
-        let scan_duration = Duration::from_secs(1);
-        time::sleep(scan_duration).await;
-        adapter.stop_scan().await?;
+        adapter.scan_for(1).await?;
 
         let peripherals = adapter.peripherals().await?;
         if peripherals.is_empty() {
