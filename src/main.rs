@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use btleplug::api::{Central, Manager as _, Peripheral as _, ScanFilter};
+use btleplug::api::{BDAddr, Central, Manager as _, Peripheral as _, ScanFilter};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use chrono::prelude::Local;
 use clap::Parser;
@@ -22,6 +22,7 @@ const HEART_RATE_CHARACTERISTIC_UUID: Uuid = uuid!("00002a37-0000-1000-8000-0080
 #[async_trait]
 trait AdapterExt {
     async fn scan_for(&self, seconds: u64) -> Result<()>;
+    async fn scan_for_peripheral(&self, address: BDAddr) -> Result<Peripheral>;
 }
 
 #[async_trait]
@@ -36,6 +37,31 @@ impl AdapterExt for Adapter {
 
         Ok(())
     }
+
+    async fn scan_for_peripheral(&self, address: BDAddr) -> Result<Peripheral> {
+        info!("Scanning for peripheral with address {}", address);
+
+        let filter = ScanFilter::default();
+        let duration = Duration::from_secs(1);
+
+        self.start_scan(filter).await?;
+        let peripheral = loop {
+            time::sleep(duration).await;
+            let peripherals = self.peripherals().await?;
+            let maybe_peripheral = peripherals
+                .iter()
+                .find(|peripheral| peripheral.address() == address);
+            match maybe_peripheral {
+                Some(peripheral) => break peripheral.clone(),
+                None => continue,
+            }
+        };
+        self.stop_scan().await?;
+
+        info!("Peripheral with address {} found", address);
+
+        Ok(peripheral)
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -48,6 +74,10 @@ struct Arguments {
     /// Client address
     #[arg(short, long, default_value_t = String::from("127.0.0.1:9000"))]
     client: String,
+
+    /// Peripheral address
+    #[arg(short, long)]
+    peripheral_address: Option<String>,
 }
 
 #[tokio::main]
@@ -79,49 +109,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         adapters.get(adapter_selection).unwrap()
     };
 
-    let peripheral = loop {
-        adapter.scan_for(1).await?;
+    // If the user passed a peripheral address, try to parse it.
+    let maybe_peripheral_address = arguments.peripheral_address.and_then(|peripheral_address| {
+        let delimiter = BDAddr::from_str_delim(&peripheral_address);
+        let no_delimiter = BDAddr::from_str_no_delim(&peripheral_address);
+        delimiter.or(no_delimiter).ok()
+    });
 
-        let peripherals = adapter.peripherals().await?;
-        if peripherals.is_empty() {
-            info!("No peripherals found, scanning again");
-            continue;
-        }
-
-        let mut peripheral_selection_items = vec![String::from("[Scan again]")];
-        peripheral_selection_items.append(
-            &mut join_all(
-                peripherals
-                    .iter()
-                    .map(|peripheral| async {
-                        format!(
-                            "{:?}",
-                            peripheral
-                                .properties()
-                                .await
-                                .unwrap()
-                                .unwrap()
-                                .local_name
-                                .unwrap()
-                        )
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .await,
-        );
-
-        let peripheral_selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("Select bluetooth peripheral")
-            .default(0)
-            .items(&peripheral_selection_items)
-            .interact()
-            .unwrap();
-        if peripheral_selection == 0 {
-            info!("User chose to scan again");
-            continue;
-        }
-
-        break peripherals.get(peripheral_selection - 1).cloned().unwrap();
+    let peripheral = if let Some(peripheral_address) = maybe_peripheral_address {
+        adapter.scan_for_peripheral(peripheral_address).await?
+    } else {
+        interactive_peripheral_scan(adapter).await?
     };
 
     let peripheral_properties = peripheral.properties().await?.unwrap();
@@ -188,4 +186,66 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+async fn interactive_peripheral_scan(adapter: &Adapter) -> Result<Peripheral> {
+    loop {
+        adapter.scan_for(1).await?;
+
+        let peripherals = adapter.peripherals().await?;
+        if peripherals.is_empty() {
+            info!("No peripherals found, scanning again");
+            continue;
+        }
+
+        let mut peripheral_selection_items = vec![String::from("[Scan again]")];
+        let mut peripheral_local_names = get_peripheral_local_names(&peripherals)
+            .await
+            .iter()
+            .map(|local_name| match local_name {
+                Some(local_name) => local_name.clone(),
+                None => String::from("(Empty)"),
+            })
+            .collect();
+        peripheral_selection_items.append(&mut peripheral_local_names);
+
+        let peripheral_selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Select bluetooth peripheral")
+            .default(0)
+            .items(&peripheral_selection_items)
+            .interact()?;
+        if peripheral_selection == 0 {
+            info!("User chose to scan again");
+            continue;
+        }
+
+        // Account for the "scan again" item.
+        let peripheral_index = peripheral_selection - 1;
+
+        match peripherals.get(peripheral_index).cloned() {
+            Some(peripheral) => break Ok(peripheral),
+            None => continue,
+        }
+    }
+}
+
+async fn get_peripheral_local_names(peripherals: &[Peripheral]) -> Vec<Option<String>> {
+    join_all(
+        peripherals
+            .iter()
+            .map(|peripheral| async {
+                match peripheral.properties().await {
+                    Err(_) => None,
+                    Ok(properties) => {
+                        if let Some(properties) = properties {
+                            properties.local_name
+                        } else {
+                            None
+                        }
+                    }
+                }
+            })
+            .collect::<Vec<_>>(),
+    )
+    .await
 }
