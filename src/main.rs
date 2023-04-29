@@ -166,7 +166,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let buffer = encoder::encode(&message).unwrap();
         socket.send_to(&buffer, &arguments.client).unwrap();
         info!(
-            "Sent message to client [{:?}]: {:?}",
+            "Sent message to client [{}]: {:?}",
             arguments.client, message
         );
 
