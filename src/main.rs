@@ -16,8 +16,8 @@ use tokio::time;
 use tracing::info;
 use uuid::{uuid, Uuid};
 
-const HEART_RATE_CHARACTERISTIC_UUID: Uuid = uuid!("00002a37-0000-1000-8000-00805f9b34fb");
 const BATTERY_LEVEL_CHARACTERISTIC_UUID: Uuid = uuid!("00002a19-0000-1000-8000-00805f9b34fb");
+const HEART_RATE_CHARACTERISTIC_UUID: Uuid = uuid!("00002a37-0000-1000-8000-00805f9b34fb");
 
 #[async_trait]
 trait AdapterExt {
