@@ -124,10 +124,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
         break peripherals.get(peripheral_selection - 1).cloned().unwrap();
     };
 
-    let peripheral_local_name = peripheral.properties().await?.unwrap().local_name.unwrap();
-    info!("Connecting to {}", peripheral_local_name);
+    let peripheral_properties = peripheral.properties().await?.unwrap();
+    let peripheral_address = peripheral_properties.address;
+    let peripheral_local_name = peripheral_properties
+        .local_name
+        .unwrap_or(String::from("(Empty)"));
+
+    info!(
+        "Connecting to {} [{}]",
+        peripheral_local_name, peripheral_address
+    );
     peripheral.connect().await?;
-    info!("Connected to {}", peripheral_local_name);
+    info!(
+        "Connected to {} [{}]",
+        peripheral_local_name, peripheral_address
+    );
 
     peripheral.discover_services().await?;
     let characteristics = peripheral.characteristics();
