@@ -124,8 +124,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         break peripherals.get(peripheral_selection - 1).cloned().unwrap();
     };
 
-    peripheral.connect().await?;
     let peripheral_local_name = peripheral.properties().await?.unwrap().local_name.unwrap();
+    info!("Connecting to {}", peripheral_local_name);
+    peripheral.connect().await?;
     info!("Connected to {}", peripheral_local_name);
 
     peripheral.discover_services().await?;
