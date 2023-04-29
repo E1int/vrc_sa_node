@@ -46,7 +46,7 @@ struct Arguments {
     host: String,
 
     /// Client address
-    #[arg(long, default_value_t = String::from("127.0.0.1:9000"))]
+    #[arg(short, long, default_value_t = String::from("127.0.0.1:9000"))]
     client: String,
 }
 
