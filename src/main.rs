@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         adapter.stop_scan().await?;
 
         let peripherals = adapter.peripherals().await?;
-        if peripherals.len() == 0 {
+        if peripherals.is_empty() {
             info!("No peripherals found, scanning again");
             continue;
         }
@@ -139,7 +139,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             peripheral_local_name, data.uuid, data.value
         );
         let beats_per_minute: u8 = data.value[1];
-        let percent = beats_per_minute as f32 / u8::MAX as f32;
+        let percent = f32::from(beats_per_minute) / f32::from(u8::MAX);
         let message = OscPacket::Message(OscMessage {
             addr: String::from("/avatar/parameters/HeartRate"),
             args: vec![OscType::Float(percent)],
