@@ -156,7 +156,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
         .unwrap();
 
-    let log_name = format!("{}.csv", Local::now().timestamp());
+    let time = Local::now().format("%Y%m%d-%H%M%S");
+    let log_name = format!("{}.csv", time);
     let mut writer = Writer::from_path(log_name)?;
 
     peripheral.subscribe(heart_rate_characteristic).await?;
