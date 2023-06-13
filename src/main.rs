@@ -67,13 +67,13 @@ impl AdapterExt for Adapter {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Arguments {
-    /// Client address
-    #[arg(long, default_value_t = String::from("127.0.0.1:9001"))]
-    client: String,
-
-    /// Host address
+    /// Receiver address
     #[arg(short, long, default_value_t = String::from("127.0.0.1:9000"))]
-    host: String,
+    receiver: String,
+
+    /// Sender address
+    #[arg(long, default_value_t = String::from("127.0.0.1:9001"))]
+    sender: String,
 
     /// Peripheral address
     #[arg(short, long)]
@@ -85,8 +85,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt::init();
 
     let arguments = Arguments::parse();
-    let socket = UdpSocket::bind(&arguments.client).unwrap();
-    info!("Binded to address {}", arguments.client);
+    let socket = UdpSocket::bind(&arguments.sender).unwrap();
+    info!("Binded to address {}", arguments.sender);
 
     let manager = Manager::new().await?;
     let adapters = manager.adapters().await?;
@@ -174,8 +174,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             args: vec![OscType::Float(percent)],
         });
         let buffer = encoder::encode(&message).unwrap();
-        socket.send_to(&buffer, &arguments.host).unwrap();
-        info!("Sent message to host [{}]: {:?}", arguments.host, message);
+        socket.send_to(&buffer, &arguments.receiver).unwrap();
+        info!(
+            "Sent message to host [{}]: {:?}",
+            arguments.receiver, message
+        );
 
         let now = Local::now().to_rfc3339();
         let heart_rate = beats_per_minute.to_string();
