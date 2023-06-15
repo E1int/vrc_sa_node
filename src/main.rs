@@ -1,18 +1,23 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use btleplug::api::{BDAddr, Central, Manager as _, Peripheral as _, ScanFilter};
+use btleplug::api::{
+    BDAddr, Central, Manager as _, Peripheral as _, ScanFilter, ValueNotification,
+};
 use btleplug::platform::{Adapter, Manager, Peripheral};
 use chrono::prelude::Local;
 use clap::Parser;
 use csv::Writer;
 use dialoguer::{theme::ColorfulTheme, Select};
 use futures::future::join_all;
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use rosc::{encoder, OscMessage, OscPacket, OscType};
 use std::error::Error;
+use std::fs::File;
 use std::net::UdpSocket;
+use std::pin::Pin;
 use std::time::Duration;
 use tokio::time;
+use tokio::time::timeout;
 use tracing::info;
 use uuid::{uuid, Uuid};
 
@@ -67,6 +72,10 @@ impl AdapterExt for Adapter {
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Arguments {
+    /// Peripheral address
+    #[arg(short, long)]
+    peripheral_address: Option<String>,
+
     /// Receiver address
     #[arg(short, long, default_value_t = String::from("127.0.0.1:9000"))]
     receiver: String,
@@ -75,9 +84,9 @@ struct Arguments {
     #[arg(long, default_value_t = String::from("127.0.0.1:9001"))]
     sender: String,
 
-    /// Peripheral address
-    #[arg(short, long)]
-    peripheral_address: Option<String>,
+    /// Timeout threshold
+    #[arg(short, long, default_value_t = 10)]
+    timeout_threshold: u64,
 }
 
 #[tokio::main]
@@ -116,77 +125,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
         delimiter.or(no_delimiter).ok()
     });
 
-    let peripheral = if let Some(peripheral_address) = maybe_peripheral_address {
-        adapter.scan_for_peripheral(peripheral_address).await?
-    } else {
-        interactive_peripheral_scan(adapter).await?
-    };
+    let threshold = Duration::from_secs(arguments.timeout_threshold);
+    let mut connected_peripheral = connect_to_peripheral(adapter, maybe_peripheral_address).await?;
+    let mut writer = get_log_writer()?;
 
-    let peripheral_properties = peripheral.properties().await?.unwrap();
-    let peripheral_address = peripheral_properties.address;
-    let peripheral_local_name = peripheral_properties
-        .local_name
-        .unwrap_or(String::from("(Empty)"));
+    loop {
+        match timeout(threshold, connected_peripheral.notification_stream.next()).await {
+            Ok(Some(data)) => {
+                info!(
+                    "Received data from {} [{:?}]: {:?}",
+                    connected_peripheral.name, data.uuid, data.value
+                );
+                let beats_per_minute: u8 = data.value[1];
+                let percent = f32::from(beats_per_minute) / f32::from(u8::MAX);
+                let message = OscPacket::Message(OscMessage {
+                    addr: String::from("/avatar/parameters/HeartRate"),
+                    args: vec![OscType::Float(percent)],
+                });
+                let buffer = encoder::encode(&message)?;
+                socket.send_to(&buffer, &arguments.receiver)?;
+                info!(
+                    "Sent message to host [{}]: {:?}",
+                    arguments.receiver, message
+                );
 
-    info!(
-        "Connecting to {} [{}]",
-        peripheral_local_name, peripheral_address
-    );
-    peripheral.connect().await?;
-    info!(
-        "Connected to {} [{}]",
-        peripheral_local_name, peripheral_address
-    );
-
-    peripheral.discover_services().await?;
-    let characteristics = peripheral.characteristics();
-
-    let battery_level_characteristic = characteristics
-        .iter()
-        .find(|characteristic| characteristic.uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID)
-        .unwrap();
-    let battery_level = peripheral.read(battery_level_characteristic).await?[0];
-    info!(
-        "Battery level of {}: {}",
-        peripheral_local_name, battery_level
-    );
-
-    let heart_rate_characteristic = characteristics
-        .iter()
-        .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
-        .unwrap();
-
-    let time = Local::now().format("%Y%m%d-%H%M%S");
-    let log_name = format!("{}.csv", time);
-    let mut writer = Writer::from_path(log_name)?;
-
-    peripheral.subscribe(heart_rate_characteristic).await?;
-    let mut notification_stream = peripheral.notifications().await?;
-    while let Some(data) = notification_stream.next().await {
-        info!(
-            "Received data from {} [{:?}]: {:?}",
-            peripheral_local_name, data.uuid, data.value
-        );
-        let beats_per_minute: u8 = data.value[1];
-        let percent = f32::from(beats_per_minute) / f32::from(u8::MAX);
-        let message = OscPacket::Message(OscMessage {
-            addr: String::from("/avatar/parameters/HeartRate"),
-            args: vec![OscType::Float(percent)],
-        });
-        let buffer = encoder::encode(&message).unwrap();
-        socket.send_to(&buffer, &arguments.receiver).unwrap();
-        info!(
-            "Sent message to host [{}]: {:?}",
-            arguments.receiver, message
-        );
-
-        let now = Local::now().to_rfc3339();
-        let heart_rate = beats_per_minute.to_string();
-        writer.write_record(&[&now, &heart_rate])?;
-        writer.flush()?;
+                let now = Local::now().to_rfc3339();
+                let heart_rate = beats_per_minute.to_string();
+                writer.write_record(&[&now, &heart_rate])?;
+                writer.flush()?;
+            }
+            Ok(None) => {}
+            Err(_) => {
+                info!(
+                    "Timed out while waiting for a notification from {}",
+                    connected_peripheral.name
+                );
+                connected_peripheral =
+                    connect_to_peripheral(adapter, Some(connected_peripheral.address)).await?
+            }
+        }
     }
-
-    Ok(())
 }
 
 async fn interactive_peripheral_scan(adapter: &Adapter) -> Result<Peripheral> {
@@ -249,4 +227,74 @@ async fn get_peripheral_local_names(peripherals: &[Peripheral]) -> Vec<Option<St
             .collect::<Vec<_>>(),
     )
     .await
+}
+
+struct ConnectedPeripheral {
+    address: BDAddr,
+    name: String,
+    notification_stream: Pin<Box<dyn Stream<Item = ValueNotification> + Send>>,
+}
+
+async fn connect_to_peripheral(
+    adapter: &Adapter,
+    maybe_peripheral_address: Option<BDAddr>,
+) -> Result<ConnectedPeripheral> {
+    let peripheral = if let Some(peripheral_address) = maybe_peripheral_address {
+        adapter.scan_for_peripheral(peripheral_address).await?
+    } else {
+        interactive_peripheral_scan(adapter).await?
+    };
+
+    let peripheral_properties = peripheral.properties().await?.unwrap();
+    let peripheral_address = peripheral_properties.address;
+    let peripheral_local_name = peripheral_properties
+        .local_name
+        .unwrap_or(String::from("(Empty)"));
+
+    info!(
+        "Connecting to {} [{}]",
+        peripheral_local_name, peripheral_address
+    );
+    while peripheral.connect().await.is_err() {
+        info!("Failed to connect to {}", peripheral_local_name)
+    }
+    info!(
+        "Connected to {} [{}]",
+        peripheral_local_name, peripheral_address
+    );
+
+    peripheral.discover_services().await?;
+    let characteristics = peripheral.characteristics();
+
+    let battery_level_characteristic = characteristics
+        .iter()
+        .find(|characteristic| characteristic.uuid == BATTERY_LEVEL_CHARACTERISTIC_UUID)
+        .expect("Failed to get battery level characteristic");
+    let battery_level = peripheral.read(battery_level_characteristic).await?[0];
+    info!(
+        "Battery level of {}: {}",
+        peripheral_local_name, battery_level
+    );
+
+    let heart_rate_characteristic = characteristics
+        .iter()
+        .find(|characteristic| characteristic.uuid == HEART_RATE_CHARACTERISTIC_UUID)
+        .expect("Failed to get heart rate characteristic");
+    peripheral.subscribe(heart_rate_characteristic).await?;
+    info!(
+        "Subscribed to heart rate characteristic of {}",
+        peripheral_local_name
+    );
+
+    return Ok(ConnectedPeripheral {
+        address: peripheral_address,
+        name: peripheral_local_name,
+        notification_stream: peripheral.notifications().await?,
+    });
+}
+
+fn get_log_writer() -> Result<Writer<File>> {
+    let time = Local::now().format("%Y%m%d-%H%M%S");
+    let log_name = format!("{}.csv", time);
+    return Writer::from_path(log_name).map_err(|error| error.into());
 }
