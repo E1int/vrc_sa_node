@@ -85,7 +85,7 @@ struct Arguments {
     sender: String,
 
     /// Timeout threshold
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short, long, default_value_t = 5)]
     timeout_threshold: u64,
 }
 
